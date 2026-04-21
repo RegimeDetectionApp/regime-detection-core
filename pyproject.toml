@@ -5,7 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "regime-detection-core"
 version = "0.1.0"
-description = "Core domain: Gaussian HMM fitting, regime detection, and walk-forward validation"
+license = {text = "MIT"}
+authors = [{name = "RegimeDetectionApp"}]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Intended Audience :: Financial and Insurance Industry",
+]description = "Core domain: Gaussian HMM fitting, regime detection, and walk-forward validation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -20,3 +31,9 @@ Repository = "https://github.com/govid13427742/regime-detection-core"
 
 [tool.setuptools.packages.find]
 include = ["regime_detection_core*"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
