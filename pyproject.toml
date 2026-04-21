@@ -16,7 +16,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Intended Audience :: Financial and Insurance Industry",
-]description = "Core domain: Gaussian HMM fitting, regime detection, and walk-forward validation"
+]
+description = "Core domain: Gaussian HMM fitting, regime detection, and walk-forward validation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
