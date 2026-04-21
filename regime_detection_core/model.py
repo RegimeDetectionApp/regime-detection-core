@@ -65,6 +65,16 @@ def state_probabilities(model: GaussianHMM, X: pd.DataFrame) -> np.ndarray:
 
 # ── Regime labelling ──────────────────────────────────────────────────────
 
+def _group_states_by_regime(label_map: dict[int, str]) -> dict[str, list[int]]:
+    """Group HMM state indices by regime label."""
+    regime_states: dict[str, list[int]] = {
+        "Crash": [], "High Volatility": [], "Low Volatility": [],
+    }
+    for state_id, label in label_map.items():
+        regime_states[label].append(state_id)
+    return regime_states
+
+
 def _state_statistics(
     states: np.ndarray,
     features: pd.DataFrame,
@@ -76,10 +86,7 @@ def _state_statistics(
         mean_return, mean_vol, mean_drawdown, std_return
     """
     cols = ["log_return", "vol_20d", "drawdown"]
-    df = features[cols].copy()
-    df["state"] = states
-
-    stats = df.groupby("state").agg(
+    stats = features[cols].assign(state=states).groupby("state").agg(
         mean_return=("log_return", "mean"),
         std_return=("log_return", "std"),
         mean_vol=("vol_20d", "mean"),
@@ -141,17 +148,20 @@ def label_regimes(
     }
 
     # Assign any extra states (n > 3) to nearest archetype by volatility
-    archetype_vols = {
-        "Crash": stats.loc[crash_state, "mean_vol"],
-        "High Volatility": stats.loc[high_vol_state, "mean_vol"],
-        "Low Volatility": stats.loc[low_vol_state, "mean_vol"],
-    }
-    for state_id in stats.index:
-        if state_id in label_map:
-            continue
-        vol = stats.loc[state_id, "mean_vol"]
-        closest = min(archetype_vols, key=lambda k: abs(archetype_vols[k] - vol))
-        label_map[state_id] = closest
+    extra = stats.index.difference(label_map.keys())
+    if len(extra) > 0:
+        archetype_vols = np.array([
+            stats.loc[crash_state, "mean_vol"],
+            stats.loc[high_vol_state, "mean_vol"],
+            stats.loc[low_vol_state, "mean_vol"],
+        ])
+        archetype_labels = ["Crash", "High Volatility", "Low Volatility"]
+        extra_vols = stats.loc[extra, "mean_vol"].values
+        # Vectorised nearest-archetype assignment
+        dists = np.abs(extra_vols[:, None] - archetype_vols[None, :])
+        nearest = dists.argmin(axis=1)
+        for sid, idx in zip(extra, nearest):
+            label_map[sid] = archetype_labels[idx]
 
     return label_map
 
@@ -176,10 +186,7 @@ def build_regime_df(
     prob_high_vol   : float — posterior probability of High Volatility regime
     prob_low_vol    : float — posterior probability of Low Volatility regime
     """
-    # Group state indices by regime label
-    regime_states: dict[str, list[int]] = {"Crash": [], "High Volatility": [], "Low Volatility": []}
-    for state_id, label in label_map.items():
-        regime_states[label].append(state_id)
+    regime_states = _group_states_by_regime(label_map)
 
     # Sum probabilities for each regime (handles n_states > 3)
     prob_crash = probs[:, regime_states["Crash"]].sum(axis=1) if regime_states["Crash"] else np.zeros(len(dates))
@@ -271,27 +278,31 @@ def walk_forward_hmm(
         train_states = decode_states(model, train_scaled)
         label_map = label_regimes(train_states, train)
 
-        # Group state indices by regime label (handles n_states > 3)
-        regime_states: dict[str, list[int]] = {"Crash": [], "High Volatility": [], "Low Volatility": []}
-        for state_id, label in label_map.items():
-            regime_states[label].append(state_id)
+        # Vectorised regime probability aggregation
+        regime_states = _group_states_by_regime(label_map)
+        regime_labels = np.array([label_map[s] for s in states])
 
-        for i, idx in enumerate(test.index):
-            oos_indices.append(idx)
-            oos_states_list.append(label_map[states[i]])
-            oos_probs_list.append({
-                "prob_crash": probs[i, regime_states["Crash"]].sum(),
-                "prob_high_vol": probs[i, regime_states["High Volatility"]].sum(),
-                "prob_low_vol": probs[i, regime_states["Low Volatility"]].sum(),
-            })
+        crash_cols = regime_states["Crash"]
+        hv_cols = regime_states["High Volatility"]
+        lv_cols = regime_states["Low Volatility"]
+        n_test = len(test)
+
+        prob_crash = probs[:, crash_cols].sum(axis=1) if crash_cols else np.zeros(n_test)
+        prob_hv = probs[:, hv_cols].sum(axis=1) if hv_cols else np.zeros(n_test)
+        prob_lv = probs[:, lv_cols].sum(axis=1) if lv_cols else np.zeros(n_test)
+
+        oos_indices.extend(test.index)
+        oos_states_list.extend(regime_labels)
+        oos_probs_list.append(np.column_stack([prob_crash, prob_hv, prob_lv]))
 
         cursor = step_end
 
+    oos_probs_arr = np.vstack(oos_probs_list)
     regime_df = pd.DataFrame({
         "regime": oos_states_list,
-        "prob_crash": [p["prob_crash"] for p in oos_probs_list],
-        "prob_high_vol": [p["prob_high_vol"] for p in oos_probs_list],
-        "prob_low_vol": [p["prob_low_vol"] for p in oos_probs_list],
+        "prob_crash": oos_probs_arr[:, 0],
+        "prob_high_vol": oos_probs_arr[:, 1],
+        "prob_low_vol": oos_probs_arr[:, 2],
     }, index=oos_indices)
 
     oos_features = features.loc[oos_indices]

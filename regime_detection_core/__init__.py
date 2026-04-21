@@ -9,6 +9,7 @@ from regime_detection_core.model import (
     walk_forward_hmm,
     select_n_states,
     compute_bic,
+    _group_states_by_regime,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "walk_forward_hmm",
     "select_n_states",
     "compute_bic",
+    "_group_states_by_regime",
 ]
